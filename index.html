@@ -1,0 +1,82 @@
+/* Ark of Osiris — plan store. Plain JS, attaches to window.OLStore.
+   The static taxonomy (LANES / OBJ / ROLE) lives in data.js as window.BP.
+   The *editable* plan (slots / roster / anubis / meta) is persisted here. */
+(function () {
+  const KEY = "ol_ark_plan_v2";
+  let _n = 0;
+  function uid(p) { return (p || "id") + Date.now().toString(36) + (_n++).toString(36); }
+  function clone(o) { return JSON.parse(JSON.stringify(o)); }
+
+  // Preset teleport drop options (5-min troop-spawn cadence from 47:40)
+  const TP_WHEN = [
+    "Immediately",
+    "1st Spawn · 47:40",
+    "2nd Spawn · 42:40",
+    "3rd Spawn · 37:40",
+    "4th Spawn · 32:40",
+    "5th Spawn · 27:40",
+    "6th Spawn · 22:40",
+    "7th Spawn · 17:40",
+    "8th Spawn · 12:40",
+  ];
+
+  function defaultPlan() {
+    const slots = clone(window.BP.SLOTS).map((s) =>
+      Object.assign({ uid: uid("s"), marker: "", anubis: false, tile: null }, s)
+    );
+    const roster = clone(window.BP.ROSTER).map((r) =>
+      Object.assign({ uid: uid("r") }, r)
+    );
+    const anubis = clone(window.BP.ANUBIS);
+    const meta = {
+      title: "Ark of Osiris",
+      weekLabel: "",
+      matchTimeUTC: "", // datetime-local string, interpreted as UTC
+    };
+    return { version: 2, slots, roster, anubis, meta };
+  }
+
+  function migrate(p) {
+    if (!p || !Array.isArray(p.slots) || !Array.isArray(p.roster)) return defaultPlan();
+    // ensure every slot/roster row has a uid
+    p.slots.forEach((s) => { if (!s.uid) s.uid = uid("s"); if (s.anubis == null) s.anubis = false; });
+    p.roster.forEach((r) => { if (!r.uid) r.uid = uid("r"); });
+    if (!p.meta) p.meta = { title: "Ark of Osiris", weekLabel: "", matchTimeUTC: "" };
+    if (!p.anubis) p.anubis = clone(window.BP.ANUBIS);
+    return p;
+  }
+
+  function loadPlan() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (!raw) return defaultPlan();
+      return migrate(JSON.parse(raw));
+    } catch (e) { return defaultPlan(); }
+  }
+
+  function savePlan(p) {
+    try { localStorage.setItem(KEY, JSON.stringify(p)); } catch (e) {}
+  }
+
+  // "publishedJSON" = a stringified snapshot of the plan last known to be live,
+  // used to detect unpublished local edits (dirty state).
+  const PUB_KEY = "ol_ark_published_v2";
+  function loadPub() { try { return localStorage.getItem(PUB_KEY) || ""; } catch (e) { return ""; } }
+  function savePub(json) { try { localStorage.setItem(PUB_KEY, json || ""); } catch (e) {} }
+
+  // organiser session (password kept for the tab session so Publish doesn't re-prompt)
+  const PW_KEY = "ol_ark_org_pw";
+  function loadPw() { try { return sessionStorage.getItem(PW_KEY) || ""; } catch (e) { return ""; } }
+  function savePw(pw) { try { if (pw) sessionStorage.setItem(PW_KEY, pw); else sessionStorage.removeItem(PW_KEY); } catch (e) {} }
+
+  // Parse a datetime-local string ("2026-06-14T14:00") as UTC → epoch ms (or null)
+  function parseUTC(v) {
+    if (!v) return null;
+    let s = v.trim();
+    if (s.length === 16) s += ":00"; // add seconds
+    const ms = Date.parse(s + "Z");
+    return isNaN(ms) ? null : ms;
+  }
+
+  window.OLStore = { KEY, uid, clone, defaultPlan, loadPlan, savePlan, parseUTC, TP_WHEN, loadPub, savePub, loadPw, savePw };
+})();
