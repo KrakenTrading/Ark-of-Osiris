@@ -1,6 +1,9 @@
-[build]
-  publish = "."
-  functions = "netlify/functions"
-
-# Static site + one serverless function. No build step required.
-# The plan is stored in Netlify Blobs by netlify/functions/plan.mjs.
+{
+  "name": "ark-of-osiris-battle-plan",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}
