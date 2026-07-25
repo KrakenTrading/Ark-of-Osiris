@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "description": "OL alliance — Ark of Osiris weekly battle plan with a shared, publishable plan.",
   "dependencies": {
     "@netlify/blobs": "^8.1.0"
   }

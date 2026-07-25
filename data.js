@@ -1,1298 +1,376 @@
-/* OL — Ark of Osiris battle plan. Static taxonomy + the seed (default) plan.
-   Plain JS, attaches to window.BP. Editable copies live in window.OLStore.
-   SEED_PLAN below is the live published plan baked in as the default. */
-(function () {
-  // ---- Lane geography (left -> right as seen on OUR side) -------------------
-  const LANES = {
-    A: { id: "A", name: "A Lane", geo: "Outer lane — OUR left", accent: "obelisk" },
-    B: { id: "B", name: "B Lane", geo: "Inner lane — OUR left", accent: "desert" },
-    C: { id: "C", name: "C Lane", geo: "Inner lane — OUR right", accent: "desert" },
-    D: { id: "D", name: "D Lane", geo: "Outer lane — OUR right", accent: "sky" },
-  };
+/* OL · Ark of Osiris — read-only UI components. Babel JSX. Exports to window.
+   Reads the live (editable) plan from PlanCtx. Static taxonomy stays on window.BP. */
+const { useState, useRef, useEffect, useMemo } = React;
+const BP = window.BP;
 
-  // ---- Objective glossary --------------------------------------------------
-  const OBJ = {
-    DA:  { key: "DA",  label: "Desert Altar",  short: "DA",  tone: "desert" },
-    SA:  { key: "SA",  label: "Sky Altar",     short: "SA",  tone: "sky" },
-    SOL: { key: "SOL", label: "Shrine of Life",short: "SoL", tone: "life" },
-    SOW: { key: "SOW", label: "Shrine of War", short: "SoW", tone: "war" },
-    OBE: { key: "OBE", label: "Obelisk",       short: "Obelisk", tone: "obelisk" },
-    OUT: { key: "OUT", label: "Outpost / Ark", short: "Outpost", tone: "neutral" },
-  };
+/* ---------- shared plan context ---------- */
+const PlanCtx = React.createContext(null);
+function usePlan() { return React.useContext(PlanCtx); }
+window.PlanCtx = PlanCtx;
+window.usePlan = usePlan;
 
-  // Role taxonomy
-  const ROLE = {
-    GARRISON: { key: "GARRISON", label: "Garrison", tone: "garrison" },
-    RALLY:    { key: "RALLY",    label: "Rally",    tone: "rally" },
-    FILL:     { key: "FILL",     label: "Fill",     tone: "fill" },
-    DISRUPT:  { key: "DISRUPT",  label: "Disrupt",  tone: "disrupt" },
-    FLEX:     { key: "FLEX",     label: "Flex",     tone: "disrupt" },
-  };
+/* lowercase-name → roster row, and name → assigned slot, derived from the plan */
+function useRosterByName() {
+  const { plan } = usePlan();
+  return useMemo(() => {
+    const m = {};
+    plan.roster.forEach((r) => { m[(r.name || "").toLowerCase()] = r; });
+    return m;
+  }, [plan.roster]);
+}
+function useAssignment() {
+  const { plan } = usePlan();
+  return useMemo(() => {
+    const byName = {}; // lower name → slot object
+    plan.slots.forEach((s) => { if (s.player) byName[s.player.toLowerCase()] = s; });
+    return byName;
+  }, [plan.slots]);
+}
 
-  // ---- Seed plan (the live published plan, baked in as the default) --------
-  const SEED_PLAN = {
-    "version": 2,
-    "slots": [
-      {
-        "uid": "smqb4m4450",
-        "marker": "★",
-        "anubis": true,
-        "tile": 44,
-        "lane": "A",
-        "slot": "A1",
-        "player": "Senex",
-        "roleLabel": "Garrison obelisk",
-        "role": "GARRISON",
-        "obj": [
-          "OBE",
-          "SOL"
-        ],
-        "tp": 10,
-        "tpWhen": "Immediately",
-        "enter": "15",
-        "start": [
-          "Fast T1 march to capture Obelisk",
-          "Garrison the Obelisk",
-          "Join A3 rally",
-          "2 marches to SoL"
-        ],
-        "rest": [
-          "Hold Garrison on Obelisk",
-          "1 march fills A2 Obelisk rally",
-          "3 marches to SA / SoL"
-        ]
-      },
-      {
-        "uid": "smqb4m4451",
-        "marker": "",
-        "anubis": false,
-        "tile": 43,
-        "lane": "A",
-        "slot": "A2",
-        "player": "NightxReaper",
-        "roleLabel": "Rally Obelisk",
-        "role": "RALLY",
-        "obj": [
-          "OBE",
-          "SA"
-        ],
-        "tp": 11,
-        "tpWhen": "Immediately",
-        "enter": "16",
-        "start": [
-          "Rally enemy Obelisk",
-          "All marches to SA"
-        ],
-        "rest": [
-          "Rally enemy Obelisk",
-          "Defend SoL",
-          "Remaining marches to enemy SA if possible"
-        ]
-      },
-      {
-        "uid": "smqb4m4452",
-        "marker": "",
-        "anubis": false,
-        "tile": 68,
-        "lane": "A",
-        "slot": "A3",
-        "player": "DarkGiyu",
-        "roleLabel": "Rally SA",
-        "role": "RALLY",
-        "obj": [
-          "SA",
-          "OBE"
-        ],
-        "tp": 12,
-        "tpWhen": "Immediately",
-        "enter": "17",
-        "start": [
-          "Rally Home Obelisk (Inf)",
-          "All marches to enemy SA"
-        ],
-        "rest": [
-          "Rally SA",
-          "Garrison SA with another march",
-          "Remaining marches to enemy SA"
-        ]
-      },
-      {
-        "uid": "smqb4m4453",
-        "marker": "",
-        "anubis": false,
-        "tile": 14,
-        "lane": "A",
-        "slot": "A4",
-        "player": "BO",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "SA"
-        ],
-        "tp": 5,
-        "tpWhen": "Immediately",
-        "enter": "18",
-        "start": [
-          "1 march joins A3 rally",
-          "Stay in Obelisk until safe",
-          "Remaining marches to enemy SA"
-        ],
-        "rest": [
-          "Remaining marches to enemy SA",
-          "1 march fills SoL",
-          "1 march fills SA"
-        ]
-      },
-      {
-        "uid": "smqb4m4454",
-        "marker": "",
-        "anubis": false,
-        "tile": 41,
-        "lane": "A",
-        "slot": "A5",
-        "player": "Kayy Muteki",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [],
-        "tp": 13,
-        "tpWhen": "2nd Spawn · 42:40",
-        "enter": "8",
-        "start": [],
-        "rest": []
-      },
-      {
-        "uid": "smqb4m4455",
-        "marker": "",
-        "anubis": false,
-        "tile": null,
-        "lane": "B",
-        "slot": "B1",
-        "player": "DevilheurnPrime",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA"
-        ],
-        "tp": 1,
-        "tpWhen": "Immediately",
-        "enter": "ASAP",
-        "start": [
-          "1 march joins B3 rally",
-          "1 march garrisons B2 DA (Inf)",
-          "Rest of marches to DA"
-        ],
-        "rest": [
-          "1 march fills B3 rally (inf)",
-          "1 march garrisons B2 DA (Inf)",
-          "Rest of marches to DA / SoW"
-        ]
-      },
-      {
-        "uid": "smqb4m4456",
-        "marker": "",
-        "anubis": false,
-        "tile": null,
-        "lane": "B",
-        "slot": "B2",
-        "player": "Ku",
-        "roleLabel": "Garrison DA",
-        "role": "GARRISON",
-        "obj": [
-          "DA",
-          "OBE"
-        ],
-        "tp": 2,
-        "tpWhen": "Immediately",
-        "enter": "22",
-        "start": [
-          "Garrison in DA (Inf)",
-          "One march fills Obelisk",
-          "Rest of marches to DA"
-        ],
-        "rest": [
-          "Garrison in DA (Inf)",
-          "Rest of marches defend DA",
-          "One march fills B3 rally or A2 Obelisk"
-        ]
-      },
-      {
-        "uid": "smqb4m4457",
-        "marker": "",
-        "anubis": false,
-        "tile": null,
-        "lane": "B",
-        "slot": "B3",
-        "player": "Ace",
-        "roleLabel": "Rally SoW",
-        "role": "RALLY",
-        "obj": [
-          "SOW",
-          "DA"
-        ],
-        "tp": 3,
-        "tpWhen": "Immediately",
-        "enter": "23",
-        "start": [
-          "Rally SoW",
-          "4 marches to DA"
-        ],
-        "rest": [
-          "1 march garrisons B2 DA (inf)",
-          "Rally enemy SoW (inf)",
-          "3 marches to SoW",
-          "Ball to Ark if needed"
-        ]
-      },
-      {
-        "uid": "smqb4m4458",
-        "marker": "㋛",
-        "anubis": false,
-        "tile": null,
-        "lane": "B",
-        "slot": "B4",
-        "player": "Alice Prime",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA"
-        ],
-        "tp": 4,
-        "tpWhen": "Immediately",
-        "enter": "24",
-        "start": [
-          "1 march to A3 rally (inf)",
-          "All marches to DA"
-        ],
-        "rest": [
-          "1 march fills B2 DA garrison",
-          "4 marches defend SoW / DA",
-          "Ball to Ark if needed"
-        ]
-      },
-      {
-        "uid": "smqb4m4459",
-        "marker": "",
-        "anubis": false,
-        "tile": null,
-        "lane": "B",
-        "slot": "B5",
-        "player": "BordoMavi 61",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "SOW"
-        ],
-        "tp": 6,
-        "tpWhen": "1st Spawn · 47:40",
-        "enter": "9",
-        "start": [
-          "1 march joins A2 rally (arch)",
-          "1 march joins Obelisk garrison",
-          "Rest of marches to DA"
-        ],
-        "rest": [
-          "Defend DA",
-          "Push / defend SoW",
-          "Fill B2 DA garrison & B3 SoW rally",
-          "Ball to Ark"
-        ]
-      },
-      {
-        "uid": "smqb4m445a",
-        "marker": "★",
-        "anubis": false,
-        "tile": null,
-        "lane": "B",
-        "slot": "B6",
-        "player": "Eragon Prime",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "SOW"
-        ],
-        "tp": 7,
-        "tpWhen": "3rd Spawn · 37:40",
-        "enter": "10",
-        "start": [
-          "1 march joins A2 rally (arch)",
-          "1 march joins Obelisk garrison",
-          "Rest of marches to DA"
-        ],
-        "rest": [
-          "Defend DA",
-          "Push / defend SoW",
-          "Fill B2 DA garrison & B3 SoW rally",
-          "Ball to Ark"
-        ]
-      },
-      {
-        "uid": "smqb4m445b",
-        "marker": "",
-        "anubis": false,
-        "tile": null,
-        "lane": "B",
-        "slot": "B7",
-        "player": "Devil",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "SOW"
-        ],
-        "tp": 8,
-        "tpWhen": "4th Spawn · 32:40",
-        "enter": "1",
-        "start": [],
-        "rest": [
-          "Defend DA",
-          "Push / defend SoW",
-          "Fill B2 DA garrison & B3 SoW rally",
-          "Ball to Ark"
-        ]
-      },
-      {
-        "uid": "smqb4m445c",
-        "marker": "",
-        "anubis": false,
-        "tile": null,
-        "lane": "B",
-        "slot": "B8",
-        "player": "Jodocast",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "SOW"
-        ],
-        "tp": 9,
-        "tpWhen": "5th Spawn · 27:40",
-        "enter": "2",
-        "start": [],
-        "rest": [
-          "Defend DA",
-          "Push / defend SoW",
-          "Fill B2 DA garrison & A2 Obelisk rally",
-          "Ball to Ark"
-        ]
-      },
-      {
-        "uid": "smqb4m445d",
-        "marker": "",
-        "anubis": false,
-        "tile": null,
-        "lane": "B",
-        "slot": "B9",
-        "player": "LOTTERIA",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "SOW"
-        ],
-        "tp": 14,
-        "tpWhen": "7th Spawn · 17:40",
-        "enter": "4",
-        "start": [
-          "All marches to DA"
-        ],
-        "rest": [
-          "Defend DA",
-          "Push / defend SoW",
-          "Fill B2 DA garrison & A2 Obelisk rally",
-          "Ball to Ark"
-        ]
-      },
-      {
-        "uid": "smqb4m445e",
-        "marker": "",
-        "anubis": false,
-        "tile": null,
-        "lane": "B",
-        "slot": "Disrupt",
-        "player": "GariBAN",
-        "roleLabel": "Disrupt — take buildings",
-        "role": "DISRUPT",
-        "obj": [
-          "OUT"
-        ],
-        "tp": 15,
-        "tpWhen": "7th Spawn · 17:40",
-        "enter": "3",
-        "start": [
-          "1× rally enemy Outpost",
-          "Disrupt enemy Outposts — take every Outpost with your marches"
-        ],
-        "rest": [
-          "All marches Ark-running",
-          "Keep taking enemy Outposts"
-        ]
-      },
-      {
-        "uid": "smqb4m445f",
-        "marker": "",
-        "anubis": false,
-        "tile": 11,
-        "lane": "C",
-        "slot": "C1",
-        "player": "Rose Prime",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "OBE"
-        ],
-        "tp": 16,
-        "tpWhen": "Immediately",
-        "enter": "19",
-        "start": [
-          "T1 march to Home Obelisk",
-          "Rest of marches to enemy DA"
-        ],
-        "rest": [
-          "Push enemy DA",
-          "1 march fills SoW",
-          "1 march fills rally"
-        ]
-      },
-      {
-        "uid": "smqb4m445g",
-        "marker": "",
-        "anubis": false,
-        "tile": 21,
-        "lane": "C",
-        "slot": "C2",
-        "player": "FORCEXIII",
-        "roleLabel": "Garrison SoW / Rally DA",
-        "role": "GARRISON",
-        "obj": [
-          "SOW",
-          "DA"
-        ],
-        "tp": 17,
-        "tpWhen": "Immediately",
-        "enter": "14",
-        "start": [
-          "Garrison mixed SoW",
-          "Rally DA (Cav)",
-          "3 marches to DA"
-        ],
-        "rest": [
-          "Rally enemy DA (inf)",
-          "3 marches to DA",
-          "Keep garrison on SoW"
-        ]
-      },
-      {
-        "uid": "smqb4m445h",
-        "marker": "",
-        "anubis": false,
-        "tile": 3,
-        "lane": "C",
-        "slot": "C3",
-        "player": "HORNY RABBIT",
-        "roleLabel": "Garrison DA",
-        "role": "GARRISON",
-        "obj": [
-          "DA"
-        ],
-        "tp": 18,
-        "tpWhen": "Immediately",
-        "enter": "13",
-        "start": [
-          "1 march fills C2 rally (for garrison)",
-          "3 marches to DA"
-        ],
-        "rest": [
-          "Garrison enemy DA (Inf)",
-          "1 march fills C2 rally or D2 Obelisk"
-        ]
-      },
-      {
-        "uid": "smqb4m445i",
-        "marker": "",
-        "anubis": false,
-        "tile": 23,
-        "lane": "C",
-        "slot": "C4",
-        "player": "乂 코로나 乂",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "SOW"
-        ],
-        "tp": 20,
-        "tpWhen": "Immediately",
-        "enter": "12",
-        "start": [
-          "1 march to D3 rally",
-          "Rest of marches to enemy DA"
-        ],
-        "rest": [
-          "1 march fills Obelisk",
-          "4 marches defend SoW / push DA"
-        ]
-      },
-      {
-        "uid": "smqb4m445j",
-        "marker": "",
-        "anubis": false,
-        "tile": 38,
-        "lane": "C",
-        "slot": "C5",
-        "player": "IVGI",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "SOW"
-        ],
-        "tp": 21,
-        "tpWhen": "1st Spawn · 47:40",
-        "enter": "11",
-        "start": [
-          "1 march joins D2 Obelisk rally (Inf)",
-          "Rest of marches to enemy DA"
-        ],
-        "rest": [
-          "Defend SoW",
-          "Push / defend DA",
-          "Fill C2 DA garrison or D2 Obelisk rally",
-          "Ball to Ark"
-        ]
-      },
-      {
-        "uid": "smqb4m445k",
-        "marker": "",
-        "anubis": false,
-        "tile": 66,
-        "lane": "C",
-        "slot": "C6",
-        "player": "Kobbie Prime",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "SOW"
-        ],
-        "tp": 22,
-        "tpWhen": "3rd Spawn · 37:40",
-        "enter": "7",
-        "start": [],
-        "rest": [
-          "Defend SoW",
-          "Push / defend DA",
-          "Fill C2 DA garrison or D2 Obelisk rally",
-          "Ball to Ark"
-        ]
-      },
-      {
-        "uid": "smqb4m445l",
-        "marker": "★",
-        "anubis": false,
-        "tile": 31,
-        "lane": "C",
-        "slot": "C7",
-        "player": "Royal Prime",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "SOW"
-        ],
-        "tp": 23,
-        "tpWhen": "4th Spawn · 32:40",
-        "enter": "ASAP",
-        "start": [],
-        "rest": [
-          "Defend SoW",
-          "Push / defend DA",
-          "Fill C2 DA garrison or D2 Obelisk rally",
-          "Ball to Ark"
-        ]
-      },
-      {
-        "uid": "smqb4m445m",
-        "marker": "",
-        "anubis": false,
-        "tile": 18,
-        "lane": "C",
-        "slot": "C8",
-        "player": "KATTY PRIMES",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "SOW"
-        ],
-        "tp": 24,
-        "tpWhen": "5th Spawn · 27:40",
-        "enter": "6",
-        "start": [],
-        "rest": [
-          "Defend SoW",
-          "Push / defend DA",
-          "Fill C2 DA garrison or D2 Obelisk rally",
-          "Ball to Ark"
-        ]
-      },
-      {
-        "uid": "smqb4m445n",
-        "marker": "",
-        "anubis": false,
-        "tile": 20,
-        "lane": "C",
-        "slot": "C9",
-        "player": "Player456",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "DA",
-          "SOW"
-        ],
-        "tp": 29,
-        "tpWhen": "7th Spawn · 17:40",
-        "enter": "ASAP",
-        "start": [
-          "All marches to enemy DA"
-        ],
-        "rest": [
-          "Defend SoW",
-          "Push / defend DA",
-          "Rally troops to Ark",
-          "Fill C2 DA garrison or D2 rally"
-        ]
-      },
-      {
-        "uid": "smqb4m445o",
-        "marker": "",
-        "anubis": false,
-        "tile": 22,
-        "lane": "C",
-        "slot": "Flex",
-        "player": "G H E T T O",
-        "roleLabel": "Flex — take buildings",
-        "role": "FLEX",
-        "obj": [
-          "OUT"
-        ],
-        "tp": 30,
-        "tpWhen": "8th Spawn · 12:40",
-        "enter": "5",
-        "start": [
-          "1 march to disrupt rally",
-          "Rest of marches help where needed"
-        ],
-        "rest": [
-          "All marches Ark-running",
-          "Take enemy Outposts"
-        ]
-      },
-      {
-        "uid": "smqb4m445p",
-        "marker": "",
-        "anubis": true,
-        "tile": 27,
-        "lane": "D",
-        "slot": "D1",
-        "player": "Force13-CPT",
-        "roleLabel": "Garrison obelisk",
-        "role": "GARRISON",
-        "obj": [
-          "OBE",
-          "SA"
-        ],
-        "tp": 19,
-        "tpWhen": "Immediately",
-        "enter": "27",
-        "start": [
-          "Garrison Obelisk (inf)",
-          "Join D3 first rally (inf)",
-          "3 marches to SA"
-        ],
-        "rest": [
-          "Garrison Obelisk (inf)",
-          "Fill D2 Obelisk rally",
-          "3 marches to SA"
-        ]
-      },
-      {
-        "uid": "smqb4m445q",
-        "marker": "",
-        "anubis": false,
-        "tile": 6,
-        "lane": "D",
-        "slot": "D2",
-        "player": "Kraken",
-        "roleLabel": "Rally Cav",
-        "role": "RALLY",
-        "obj": [
-          "OBE",
-          "SA"
-        ],
-        "tp": 25,
-        "tpWhen": "Immediately",
-        "enter": "26",
-        "start": [
-          "Rally enemy Obelisk (cav)",
-          "Fill D3 garrison",
-          "Rest of marches to enemy SA"
-        ],
-        "rest": [
-          "Rally enemy Obelisk (cav)",
-          "Fill D3 garrison",
-          "Rest of marches to enemy SA"
-        ]
-      },
-      {
-        "uid": "smqb4m445r",
-        "marker": "",
-        "anubis": false,
-        "tile": 26,
-        "lane": "D",
-        "slot": "D3",
-        "player": "Overworked",
-        "roleLabel": "Garrison SA",
-        "role": "GARRISON",
-        "obj": [
-          "SA"
-        ],
-        "tp": 26,
-        "tpWhen": "Immediately",
-        "enter": "25",
-        "start": [
-          "Rally Home Obelisk (Inf)",
-          "Rest of marches to SA"
-        ],
-        "rest": [
-          "Garrison SA (Inf)",
-          "Defend SA with all marches"
-        ]
-      },
-      {
-        "uid": "smqb4m445s",
-        "marker": "★",
-        "anubis": false,
-        "tile": 19,
-        "lane": "D",
-        "slot": "D4",
-        "player": "DrEvilPrime",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [
-          "SA",
-          "OBE"
-        ],
-        "tp": 27,
-        "tpWhen": "Immediately",
-        "enter": "21",
-        "start": [
-          "1 march joins D3 rally",
-          "Rest of marches to SA"
-        ],
-        "rest": [
-          "All marches to SA",
-          "Always fill Obelisk & SA garrison",
-          "Defend / retake every building in your line"
-        ]
-      },
-      {
-        "uid": "smqb4m445t",
-        "marker": "",
-        "anubis": false,
-        "tile": 45,
-        "lane": "D",
-        "slot": "D5",
-        "player": "MrKienDZ",
-        "roleLabel": "Fill",
-        "role": "FILL",
-        "obj": [],
-        "tp": 28,
-        "tpWhen": "2nd Spawn · 42:40",
-        "enter": "20",
-        "start": [],
-        "rest": []
-      }
-    ],
-    "roster": [
-      {
-        "uid": "rmqb4m445u",
-        "name": "Ace",
-        "power": 257,
-        "marches": 6,
-        "rally": "Yes",
-        "garrison": "Yes",
-        "vote": "yes",
-        "slot": "B3"
-      },
-      {
-        "uid": "rmqb4m445v",
-        "name": "Ku",
-        "power": 197,
-        "marches": null,
-        "rally": "Yes (arch)",
-        "garrison": "Yes (inf · Gorgo Hera)",
-        "vote": "yes",
-        "slot": "B2"
-      },
-      {
-        "uid": "rmqb4m445w",
-        "name": "Satan Himself",
-        "power": 191,
-        "marches": "5+?",
-        "rally": "Yes",
-        "garrison": "Yes?",
-        "vote": "No",
-        "slot": "D3"
-      },
-      {
-        "uid": "rmqb4m445x",
-        "name": "Duong Tank",
-        "power": 180,
-        "marches": 6,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "?",
-        "slot": "B1"
-      },
-      {
-        "uid": "rmqb4m445y",
-        "name": "Rose Prime",
-        "power": 173,
-        "marches": null,
-        "rally": "—",
-        "garrison": "—",
-        "vote": "yes",
-        "slot": "C1"
-      },
-      {
-        "uid": "rmqb4m445z",
-        "name": "DarkGiyu",
-        "power": 161,
-        "marches": 7,
-        "rally": "Yes (arch?)",
-        "garrison": "—",
-        "vote": "yes",
-        "slot": "A3"
-      },
-      {
-        "uid": "rmqb4m44510",
-        "name": "Kobbie Prime",
-        "power": 162,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m44511",
-        "name": "FORCEXIII",
-        "power": 154,
-        "marches": 7,
-        "rally": "Yes (cav)",
-        "garrison": "Yes?",
-        "vote": "yes",
-        "slot": "C2"
-      },
-      {
-        "uid": "rmqb4m44512",
-        "name": "Alice Prime",
-        "power": 149,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "B4"
-      },
-      {
-        "uid": "rmqb4m44513",
-        "name": "SeNex",
-        "power": 143,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "A1"
-      },
-      {
-        "uid": "rmqb4m44514",
-        "name": "DevilheurnPrime",
-        "power": 147,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m44515",
-        "name": "MrKienDZ",
-        "power": 142,
-        "marches": 6,
-        "rally": "No",
-        "garrison": "Yes (maybe inf)",
-        "vote": "yes",
-        "slot": "D5"
-      },
-      {
-        "uid": "rmqb4m44516",
-        "name": "Kraken",
-        "power": 140,
-        "marches": 5,
-        "rally": "Yes ?",
-        "garrison": "—",
-        "vote": "yes",
-        "slot": "D2"
-      },
-      {
-        "uid": "rmqb4m44517",
-        "name": "A9 Prime",
-        "power": 139,
-        "marches": null,
-        "rally": "—",
-        "garrison": "—",
-        "vote": "yes",
-        "slot": "B5"
-      },
-      {
-        "uid": "rmqb4m44518",
-        "name": "NightxReaper",
-        "power": 129,
-        "marches": 7,
-        "rally": "—",
-        "garrison": "—",
-        "vote": "yes",
-        "slot": "A2"
-      },
-      {
-        "uid": "rmqb4m44519",
-        "name": "Force13-CPT",
-        "power": 132,
-        "marches": 6,
-        "rally": "No",
-        "garrison": "Yes (inf)",
-        "vote": "yes",
-        "slot": "D1"
-      },
-      {
-        "uid": "rmqb4m4451a",
-        "name": "Kayy Muteki",
-        "power": 111,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "A5"
-      },
-      {
-        "uid": "rmqb4m4451b",
-        "name": "乂 코로나 乂",
-        "power": 113,
-        "marches": 6,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "C4"
-      },
-      {
-        "uid": "rmqb4m4451c",
-        "name": "HORNY RABBIT",
-        "power": 111,
-        "marches": 6,
-        "rally": "No",
-        "garrison": "Yes (inf)",
-        "vote": "yes",
-        "slot": "C3"
-      },
-      {
-        "uid": "rmqb4m4451d",
-        "name": "Devil",
-        "power": 106,
-        "marches": 6,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "No",
-        "slot": "B7"
-      },
-      {
-        "uid": "rmqb4m4451e",
-        "name": "Player456",
-        "power": 105,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "C9"
-      },
-      {
-        "uid": "rmqb4m4451f",
-        "name": "BO",
-        "power": 103,
-        "marches": 6,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "A4"
-      },
-      {
-        "uid": "rmqb4m4451g",
-        "name": "ConstantinePrime",
-        "power": 103,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "C6"
-      },
-      {
-        "uid": "rmqb4m4451h",
-        "name": "LOTTERIA",
-        "power": 97,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "B9"
-      },
-      {
-        "uid": "rmqb4m4451i",
-        "name": "Royal Prime",
-        "power": 100,
-        "marches": "3/4",
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "C7"
-      },
-      {
-        "uid": "rmqb4m4451j",
-        "name": "RagPro",
-        "power": 94,
-        "marches": 4,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m4451k",
-        "name": "DBawsy",
-        "power": 94,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "?",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m4451l",
-        "name": "KATTY PRIMES",
-        "power": 96,
-        "marches": 4,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "C8"
-      },
-      {
-        "uid": "rmqb4m4451m",
-        "name": "IVGI",
-        "power": 94,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "C5"
-      },
-      {
-        "uid": "rmqb4m4451n",
-        "name": "BordoMavi 61",
-        "power": 92,
-        "marches": 6,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m4451o",
-        "name": "Edvenz",
-        "power": 91,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "No",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m4451p",
-        "name": "DrEvilPrime",
-        "power": 90,
-        "marches": 4,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "D4"
-      },
-      {
-        "uid": "rmqb4m4451q",
-        "name": "EZZO",
-        "power": 90,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "No",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m4451r",
-        "name": "Deus",
-        "power": 89,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "No",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m4451s",
-        "name": "YADA",
-        "power": 90,
-        "marches": null,
-        "rally": "—",
-        "garrison": "—",
-        "vote": "yes",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m4451t",
-        "name": "Fishy",
-        "power": 86,
-        "marches": 4,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m4451u",
-        "name": "TinkyWinky",
-        "power": 86,
-        "marches": 4,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m4451v",
-        "name": "AmeoPrime",
-        "power": 84,
-        "marches": 3,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m4451w",
-        "name": "Jodocast",
-        "power": 91,
-        "marches": 6,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "B8"
-      },
-      {
-        "uid": "rmqb4m4451x",
-        "name": "Void",
-        "power": 79,
-        "marches": 4,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m4451y",
-        "name": "G H E T T O",
-        "power": 84,
-        "marches": 4,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "Flex"
-      },
-      {
-        "uid": "rmqb4m4451z",
-        "name": "GariBAN",
-        "power": 80,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "Yes (Cav)",
-        "vote": "yes",
-        "slot": "Disrupt"
-      },
-      {
-        "uid": "rmqb4m44520",
-        "name": "Eragon Prime",
-        "power": 80,
-        "marches": 5,
-        "rally": "No",
-        "garrison": "No",
-        "vote": "yes",
-        "slot": "B6"
-      },
-      {
-        "uid": "rmqb4m44521",
-        "name": "Overworked",
-        "power": null,
-        "marches": null,
-        "rally": "—",
-        "garrison": "—",
-        "vote": "yes",
-        "slot": null
-      },
-      {
-        "uid": "rmqb4m44522",
-        "name": "Itachi",
-        "power": null,
-        "marches": null,
-        "rally": "—",
-        "garrison": "—",
-        "vote": "No",
-        "slot": null
-      }
-    ],
-    "anubis": {
-      "title": "Anubis Boss",
-      "firstSpawn": "40:30",
-      "secondSpawn": "22:00",
-      "reward": "+15% points generation (minimum)",
-      "lines": [
-        "On the FIRST spawn (40:30) all flagged marches go to the Anubis boss.",
-        "Killing it grants +15% points generation.",
-        "AOE hits 2 random marches every 40 seconds.",
-        "If your march is targeted → GET OUT FAST.",
-        "Leave 1–2 marches to defend the line if needed.",
-        "Second spawn (22:00) is optional — not necessary to do it."
-      ]
-    },
-    "meta": {
-      "title": "Ark of Osiris",
-      "weekLabel": "14 June Divison Finals",
-      "matchTimeUTC": "2026-06-14T15:00"
-    }
-  };
+/* ---------- small atoms ---------- */
+function ObjTag({ k }) {
+  const o = BP.OBJ[k];
+  if (!o) return null;
+  return <span className={"tag tone-" + o.tone} title={o.label}>{o.short}</span>;
+}
+function RoleBadge({ role }) {
+  const r = BP.ROLE[role];
+  if (!r) return null;
+  return <span className={"role role-" + r.tone}>{r.label}</span>;
+}
+function Marker({ m }) {
+  if (!m) return null;
+  return <span className="marker" title="Flagged player">{m}</span>;
+}
+function VotePip({ v }) {
+  const t = v === "No" ? "no" : v === "?" ? "maybe" : "yes";
+  const label = v === "No" ? "No" : v === "?" ? "?" : "In";
+  return <span className={"pip pip-" + t}>{label}</span>;
+}
 
-  const SLOTS  = SEED_PLAN.slots;
-  const ROSTER = SEED_PLAN.roster;
-  const ANUBIS = SEED_PLAN.anubis;
-  const META   = SEED_PLAN.meta;
+/* ---------- slot card (read view) ---------- */
+function SlotCard({ s, selected, onToggle, open }) {
+  const rosterByName = useRosterByName();
+  const ros = s.player ? rosterByName[s.player.toLowerCase()] : null;
+  const hasOrders = (s.start && s.start.length) || (s.rest && s.rest.length);
+  const empty = !s.player;
+  return (
+    <div
+      id={"card-" + s.uid}
+      className={"slot-card" + (selected ? " is-selected" : "") + (open ? " is-open" : "") + (empty ? " is-empty" : "")}
+      onClick={() => onToggle(s.uid)}
+    >
+      <div className="slot-top">
+        <span className="slot-id">{s.slot}</span>
+        <div className="slot-name-wrap">
+          <span className="slot-name">{s.player || <em className="unfilled">— open seat —</em>}<Marker m={s.marker} /></span>
+          <span className="slot-role-label">{s.roleLabel}</span>
+        </div>
+        {ros && ros.power != null && <span className="slot-power">{ros.power}<i>pwr</i></span>}
+      </div>
 
-  window.BP = { LANES, OBJ, ROLE, SLOTS, ANUBIS, ROSTER, META, SEED_PLAN };
-})();
+      <div className="slot-meta">
+        <RoleBadge role={s.role} />
+        <div className="tag-row">{(s.obj || []).map((k) => <ObjTag key={k} k={k} />)}</div>
+        {s.anubis && <span className="anubis-flag" title="Goes to Anubis boss on first spawn">☥ Anubis</span>}
+      </div>
+
+      <div className="slot-orderbar">
+        <span className="ob"><i>TP</i><b>№{s.tp}</b></span>
+        <span className="ob"><i>Drop</i><b>{(s.tpWhen || "").split(" · ")[0]}</b></span>
+        <span className="ob"><i>Enter</i><b>{s.enter}</b></span>
+        {hasOrders && <span className="ob-toggle">{open ? "Hide orders ▲" : "Orders ▼"}</span>}
+      </div>
+
+      {open && hasOrders && (
+        <div className="orders" onClick={(e) => e.stopPropagation()}>
+          {s.start && s.start.length > 0 && (
+            <div className="order-col">
+              <h5>Start of match</h5>
+              <ul>{s.start.map((l, i) => <li key={i}>{l}</li>)}</ul>
+            </div>
+          )}
+          {s.rest && s.rest.length > 0 && (
+            <div className="order-col">
+              <h5>Rest of match</h5>
+              <ul>{s.rest.map((l, i) => <li key={i}>{l}</li>)}</ul>
+            </div>
+          )}
+          {(s.tpWhen || "").includes("·") && (
+            <div className="order-foot">Teleport drop: <b>{s.tpWhen}</b></div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------- lane column ---------- */
+const LANE_OBJ = {
+  A: ["OBE", "SA", "SOL"],
+  B: ["DA", "SOW"],
+  C: ["DA", "SOW"],
+  D: ["SA", "OBE"],
+};
+function LaneColumn({ laneId, slots, selected, openSlot, onToggle }) {
+  const lane = BP.LANES[laneId];
+  return (
+    <div className={"lane lane-" + lane.accent}>
+      <div className="lane-head">
+        <div className="lane-title">
+          <span className="lane-letter">{laneId}</span>
+          <div>
+            <div className="lane-name">{lane.name}</div>
+            <div className="lane-geo">{lane.geo}</div>
+          </div>
+        </div>
+        <div className="lane-objs">{LANE_OBJ[laneId].map((k) => <ObjTag key={k} k={k} />)}</div>
+      </div>
+      <div className="lane-slots">
+        {slots.length === 0 && <div className="lane-empty">No slots in this lane yet.</div>}
+        {slots.map((s) => (
+          <SlotCard
+            key={s.uid}
+            s={s}
+            selected={selected === s.uid}
+            open={openSlot === s.uid}
+            onToggle={onToggle}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Anubis banner ---------- */
+function AnubisBanner() {
+  const { plan } = usePlan();
+  const a = plan.anubis;
+  const assigned = useMemo(
+    () => plan.slots.filter((s) => s.anubis && s.player),
+    [plan.slots]
+  );
+  return (
+    <div className="anubis">
+      <div className="anubis-glyph">☥</div>
+      <div className="anubis-body">
+        <div className="anubis-head">
+          <h3>{a.title}</h3>
+          <div className="anubis-times">
+            <span><i>1st spawn</i><b>{a.firstSpawn}</b></span>
+            <span><i>2nd spawn</i><b>{a.secondSpawn}</b></span>
+            <span className="reward"><i>reward</i><b>{a.reward}</b></span>
+          </div>
+        </div>
+        <ul className="anubis-lines">{a.lines.map((l, i) => <li key={i}>{l}</li>)}</ul>
+        <div className="anubis-who">
+          Assigned:{" "}
+          {assigned.length
+            ? assigned.map((s, i) => (
+                <span key={s.uid}><b>{s.player} ({s.slot})</b>{i < assigned.length - 1 ? ", " : ""}</span>
+              ))
+            : <span>— flag obelisk garrisons in Manage —</span>}
+          {assigned.length > 0 && " — obelisk garrisons."}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Teleport timeline (grouped by drop phase) ---------- */
+const PHASE_ORDER = ["Immediately", "1st Spawn", "2nd Spawn", "3rd Spawn", "4th Spawn", "5th Spawn", "6th Spawn", "7th Spawn", "8th Spawn"];
+function TeleportTimeline({ onPick }) {
+  const { plan } = usePlan();
+  const groups = useMemo(() => {
+    const by = {};
+    plan.slots.forEach((s) => {
+      const key = (s.tpWhen || "Immediately").split(" · ")[0];
+      (by[key] = by[key] || []).push(s);
+    });
+    Object.values(by).forEach((arr) => arr.sort((a, b) => (a.tp || 0) - (b.tp || 0)));
+    const ordered = PHASE_ORDER.filter((p) => by[p]).map((p) => {
+      const time = (by[p][0].tpWhen || "").split(" · ")[1] || null;
+      return { phase: p, time, slots: by[p] };
+    });
+    // include any non-standard phases at the end
+    Object.keys(by).forEach((p) => {
+      if (!PHASE_ORDER.includes(p)) ordered.push({ phase: p, time: null, slots: by[p] });
+    });
+    return ordered;
+  }, [plan.slots]);
+  return (
+    <div className="tl-wrap">
+      <p className="tab-intro">
+        Execution order, top to bottom. Everyone in <b>Immediately</b> drops at match start; each spawn
+        block teleports in on its troop wave (the clock counts down). № = your in-game teleport seat.
+      </p>
+      {groups.map((g, gi) => (
+        <div className="tl-phase" key={g.phase}>
+          <div className="tl-phead">
+            <span className="tl-pstep">{gi + 1}</span>
+            <span className="tl-pname">{g.phase}</span>
+            {g.time && <span className="tl-ptime">{g.time}</span>}
+            <span className="tl-pcount">{g.slots.length} {g.slots.length === 1 ? "drop" : "drops"}</span>
+          </div>
+          <div className="timeline">
+            {g.slots.map((s) => (
+              <button key={s.uid} className="tl-row" onClick={() => onPick(s.uid)}>
+                <span className="tl-no">№{s.tp}</span>
+                <span className={"tl-lane lane-dot-" + BP.LANES[s.lane].accent}>{s.slot}</span>
+                <span className="tl-name">{s.player || <em className="unfilled">open seat</em>}<Marker m={s.marker} /></span>
+                <span className="tl-role"><RoleBadge role={s.role} /></span>
+                <span className="tl-enter">enter {s.enter}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ---------- Map & references ---------- */
+function MapTab() {
+  return (
+    <div className="maptab">
+      <p className="tab-intro">
+        Priority teleport &amp; placement. <b>Top team</b> takes the left (Shrine of Life / Desert Altar),
+        <b> bottom team</b> the right (Shrine of War / Sky Altar). Each circled number is a teleport seat —
+        solid circles drop first, dashed circles ride in on the troop-spawn time shown.
+      </p>
+      <figure className="map-figure">
+        <img src={window.OL_MAP_IMG || "assets/teleport-map.png"} alt="Priority teleports and placement — top team and bottom team" />
+      </figure>
+      <div className="map-legend">
+        <span><i className="ml-dot ml-top"></i>Top team — A &amp; B lanes (Shrine of Life / Desert Altar)</span>
+        <span><i className="ml-dot ml-bot"></i>Bottom team — C &amp; D lanes (Shrine of War / Sky Altar)</span>
+      </div>
+      <div className="map-grid">
+        <image-slot id="ol-map-extra" style={{ width: "100%", height: "300px", display: "block" }} radius="14" placeholder="Drop another reference (optional)"></image-slot>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Roster table (read view) ---------- */
+function RosterTable({ onPick }) {
+  const { plan } = usePlan();
+  const assignment = useAssignment();
+  const [sort, setSort] = useState({ key: "power", dir: -1 });
+  const [filter, setFilter] = useState("all"); // all | assigned | reserve
+
+  const withSlot = useMemo(
+    () => plan.roster.map((r) => ({ ...r, _slot: assignment[(r.name || "").toLowerCase()] || null })),
+    [plan.roster, assignment]
+  );
+  const rows = useMemo(() => {
+    let r = [...withSlot];
+    if (filter === "assigned") r = r.filter((x) => x._slot);
+    if (filter === "reserve") r = r.filter((x) => !x._slot);
+    const { key, dir } = sort;
+    r.sort((a, b) => {
+      let va = a[key], vb = b[key];
+      if (key === "power" || key === "marches") { va = parseFloat(va) || -1; vb = parseFloat(vb) || -1; }
+      else { va = ("" + va).toLowerCase(); vb = ("" + vb).toLowerCase(); }
+      return va < vb ? dir : va > vb ? -dir : 0;
+    });
+    return r;
+  }, [withSlot, sort, filter]);
+
+  const head = (key, label) => (
+    <th
+      className={"sortable" + (sort.key === key ? " active" : "")}
+      onClick={() => setSort((s) => ({ key, dir: s.key === key ? -s.dir : -1 }))}
+    >
+      {label}{sort.key === key ? (sort.dir === -1 ? " ▾" : " ▴") : ""}
+    </th>
+  );
+
+  const assigned = withSlot.filter((r) => r._slot).length;
+  return (
+    <div className="roster-wrap">
+      <div className="roster-bar">
+        <div className="seg">
+          {[["all", "All " + plan.roster.length], ["assigned", "Assigned " + assigned], ["reserve", "Reserve " + (plan.roster.length - assigned)]].map(([k, l]) => (
+            <button key={k} className={filter === k ? "on" : ""} onClick={() => setFilter(k)}>{l}</button>
+          ))}
+        </div>
+      </div>
+      <div className="table-scroll">
+        <table className="roster">
+          <thead>
+            <tr>
+              {head("name", "Player")}
+              {head("power", "Power")}
+              {head("marches", "Marches")}
+              {head("rally", "Rally")}
+              {head("garrison", "Garrison")}
+              <th>Slot</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.uid} className={!r._slot ? "is-reserve" : ""} onClick={() => r._slot && onPick(r._slot.uid)}>
+                <td className="rn">{r.name}</td>
+                <td className="num">{r.power != null ? r.power : "—"}</td>
+                <td className="num">{r.marches != null ? r.marches : "—"}</td>
+                <td className="cap">{r.rally}</td>
+                <td className="cap">{r.garrison}</td>
+                <td>{r._slot ? <span className="slot-chip" onClick={(e) => { e.stopPropagation(); onPick(r._slot.uid); }}>{r._slot.slot}</span> : <span className="res-chip">reserve</span>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Legend ---------- */
+function Legend() {
+  return (
+    <div className="legend">
+      <div className="legend-grid">
+        <section>
+          <h4>Objectives</h4>
+          <ul className="gloss">
+            <li><span className="tag tone-desert">DA</span> Desert Altar</li>
+            <li><span className="tag tone-sky">SA</span> Sky Altar</li>
+            <li><span className="tag tone-life">SoL</span> Shrine of Life</li>
+            <li><span className="tag tone-war">SoW</span> Shrine of War</li>
+            <li><span className="tag tone-obelisk">Obelisk</span> Capture &amp; garrison points</li>
+            <li><span className="tag tone-neutral">Outpost</span> Outposts &amp; Ark</li>
+          </ul>
+        </section>
+        <section>
+          <h4>Roles</h4>
+          <ul className="gloss">
+            <li><span className="role role-garrison">Garrison</span> Hold a building defensively</li>
+            <li><span className="role role-rally">Rally</span> Lead the attack on a target</li>
+            <li><span className="role role-fill">Fill</span> Reinforce rallies &amp; garrisons, push line</li>
+            <li><span className="role role-disrupt">Disrupt</span> Raid outposts, Ark-run, harass</li>
+          </ul>
+        </section>
+        <section className="geo-card">
+          <h4>Lane geography <span>(our side)</span></h4>
+          <div className="geo-map">
+            <div className="geo-lane gl-obelisk"><b>A</b><span>outer L</span></div>
+            <div className="geo-lane gl-desert"><b>B</b><span>inner L</span></div>
+            <div className="geo-mid">MID · Ark · Anubis</div>
+            <div className="geo-lane gl-desert"><b>C</b><span>inner R</span></div>
+            <div className="geo-lane gl-sky"><b>D</b><span>outer R</span></div>
+          </div>
+          <p className="geo-note">
+            A &amp; D are the outer lanes (Obelisk → Sky push). B &amp; C are the inner lanes feeding the Desert Altar &amp; War shrine.
+          </p>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, {
+  ObjTag, RoleBadge, Marker, VotePip, SlotCard, LaneColumn,
+  AnubisBanner, TeleportTimeline, RosterTable, Legend, MapTab,
+  useRosterByName, useAssignment,
+});

@@ -1,286 +1,99 @@
-/* OL · Ark of Osiris — app shell, plan state, context, countdown + shared-cloud wiring. Babel JSX. */
-const { useState: useS, useMemo: useM, useRef: useR, useEffect: useE } = React;
-const PlanCtx = window.PlanCtx;
+/* OL · Ark of Osiris — cloud / organiser UI. Babel JSX. Exports to window. */
+const { useState: useCS, useEffect: useCE, useRef: useCR } = React;
 
-const BASE_TABS = [
-  { id: "board", label: "Battle Board" },
-  { id: "teleport", label: "Teleport Order" },
-  { id: "roster", label: "Roster" },
-  { id: "map", label: "Map" },
-  { id: "legend", label: "Legend" },
-];
-
-function scrollToCard(uid) {
-  const el = document.getElementById("card-" + uid);
-  if (!el) return;
-  const y = el.getBoundingClientRect().top + window.scrollY - 96;
-  window.scrollTo({ top: y, behavior: "smooth" });
-}
-function nextLabel(lane, slots) {
-  const taken = new Set(slots.map((s) => s.slot));
-  let i = slots.filter((s) => s.lane === lane).length + 1;
-  while (taken.has(lane + i)) i++;
-  return lane + i;
-}
-function nextTp(slots) { return slots.reduce((mx, s) => Math.max(mx, s.tp || 0), 0) + 1; }
-
-/* ---------- search ---------- */
-function SearchBar({ onSelect }) {
-  const { plan } = window.usePlan();
-  const assignment = window.useAssignment();
-  const [q, setQ] = useS("");
-  const [focus, setFocus] = useS(false);
-  const matches = useM(() => {
-    const t = q.trim().toLowerCase();
-    if (!t) return [];
-    return plan.roster
-      .filter((r) => (r.name || "").toLowerCase().includes(t))
-      .map((r) => ({ name: r.name, slot: assignment[(r.name || "").toLowerCase()] || null }))
-      .slice(0, 7);
-  }, [q, plan.roster, assignment]);
-  const pick = (m) => { setQ(""); setFocus(false); if (m.slot) onSelect(m.slot.uid); };
+/* live/offline pill shown in the header for everyone */
+function CloudPill({ status }) {
+  const map = {
+    loading: ["loading", "Connecting…"],
+    live: ["live", "Live plan"],
+    empty: ["live", "Live · not published yet"],
+    offline: ["offline", "Local only"],
+  };
+  const [cls, label] = map[status] || map.offline;
   return (
-    <div className="search">
-      <span className="search-ico">⌕</span>
-      <input
-        value={q} placeholder="Find your name…"
-        onChange={(e) => setQ(e.target.value)}
-        onFocus={() => setFocus(true)}
-        onBlur={() => setTimeout(() => setFocus(false), 150)}
-        onKeyDown={(e) => { if (e.key === "Enter" && matches[0]) pick(matches[0]); }}
-      />
-      {focus && matches.length > 0 && (
-        <div className="search-pop">
-          {matches.map((m) => (
-            <button key={m.name} className="search-item" onMouseDown={() => pick(m)}>
-              <span className="si-name">{m.name}</span>
-              {m.slot ? <span className="si-slot">{m.slot.slot}</span> : <span className="si-res">reserve</span>}
-            </button>
-          ))}
+    <span className={"cloud-pill cp-" + cls} title={
+      cls === "live" ? "Everyone sees this same plan from the server."
+      : "No shared server reachable — changes save only in this browser."
+    }>
+      <i className="cp-dot"></i>{label}
+    </span>
+  );
+}
+
+/* organiser controls (only mounted when relevant) */
+function OrganiserBar({ signedIn, dirty, pubState, pubMsg, offline, cloudNewer, savedLabel, onSignIn, onPublish, onSignOut, onLoadLatest }) {
+  if (!signedIn) {
+    return <button className="org-btn" onClick={onSignIn} title="Organiser sign-in">⚿ Organiser</button>;
+  }
+  let label = "Up to date", disabled = true, cls = "pub-clean";
+  if (offline) { label = "Local only"; disabled = true; cls = "pub-offline"; }
+  else if (pubState === "publishing") { label = "Publishing…"; disabled = true; cls = "pub-busy"; }
+  else if (pubState === "error") { label = "Retry publish"; disabled = false; cls = "pub-error"; }
+  else if (dirty) { label = "Publish changes"; disabled = false; cls = "pub-dirty"; }
+  else if (pubState === "done") { label = "Published ✓"; disabled = true; cls = "pub-done"; }
+
+  return (
+    <div className="org-bar">
+      <span className="org-tag">Organiser</span>
+      <button className={"pub-btn " + cls} disabled={disabled} onClick={onPublish}>
+        {dirty && !offline && pubState !== "publishing" && <i className="pub-dot"></i>}
+        {label}
+      </button>
+      <button className="org-out" title="Sign out" onClick={onSignOut}>✕</button>
+      {cloudNewer && (
+        <div className="org-warn">
+          Someone else published a newer plan. <button onClick={onLoadLatest}>Load latest</button>
         </div>
       )}
+      {pubState === "error" && pubMsg && <div className="org-err">{pubMsg}</div>}
+      {!dirty && !offline && savedLabel && pubState !== "error" && <span className="org-saved">{savedLabel}</span>}
     </div>
   );
 }
 
-/* ---------- root ---------- */
-function App() {
-  const [plan, setPlan] = useS(() => window.OLStore.loadPlan());
-  const [tab, setTab] = useS("board");
-  const [selected, setSelected] = useS(null);
-  const [openSlot, setOpenSlot] = useS(null);
-
-  // cloud / organiser state
-  const [cloudStatus, setCloudStatus] = useS("loading"); // loading | live | empty | offline
-  const [signedIn, setSignedIn] = useS(() => !!window.OLStore.loadPw());
-  const [pubJSON, setPubJSON] = useS(() => window.OLStore.loadPub());
-  const [pubState, setPubState] = useS("idle"); // idle | publishing | done | error
-  const [pubMsg, setPubMsg] = useS("");
-  const [savedLabel, setSavedLabel] = useS("");
-  const [cloudNewer, setCloudNewer] = useS(false);
-  const [publishedAt, setPublishedAt] = useS(null);
-  const [modalOpen, setModalOpen] = useS(false);
-  const [modalBusy, setModalBusy] = useS(false);
-  const [modalErr, setModalErr] = useS("");
-
-  // autosave working copy
-  useE(() => { window.OLStore.savePlan(plan); }, [plan]);
-
-  const dirty = useM(() => JSON.stringify(plan) !== pubJSON, [plan, pubJSON]);
-
-  // on mount: pull the shared plan
-  useE(() => {
-    let alive = true;
-    (async () => {
-      const res = await window.OLCloud.get();
-      if (!alive) return;
-      const avail = window.OLCloud.isAvailable();
-      if (res && res.plan) {
-        const cloud = res.plan;
-        const cloudJSON = JSON.stringify(cloud);
-        const localJSON = JSON.stringify(plan);
-        const prevPub = window.OLStore.loadPub();
-        const signed = !!window.OLStore.loadPw();
-        const localDirty = localJSON !== prevPub;
-        if (!signed || !localDirty) {
-          setPlan(cloud); setPubJSON(cloudJSON); window.OLStore.savePub(cloudJSON);
-        } else if (cloudJSON !== prevPub) {
-          setCloudNewer(true);
-        }
-        setPublishedAt(res.savedAt || null);
-        setCloudStatus("live");
-      } else {
-        setCloudStatus(avail === false ? "offline" : "empty");
-      }
-    })();
-    return () => { alive = false; };
-  }, []);
-
-  const api = useM(() => ({
-    plan,
-    updateMeta: (patch) => setPlan((p) => ({ ...p, meta: { ...p.meta, ...patch } })),
-    updateAnubis: (patch) => setPlan((p) => ({ ...p, anubis: { ...p.anubis, ...patch } })),
-    updateSlot: (uid, patch) => setPlan((p) => ({ ...p, slots: p.slots.map((s) => (s.uid === uid ? { ...s, ...patch } : s)) })),
-    addSlot: (lane) => setPlan((p) => ({
-      ...p,
-      slots: [...p.slots, {
-        uid: window.OLStore.uid("s"), lane, slot: nextLabel(lane, p.slots),
-        player: "", marker: "", roleLabel: "Fill", role: "FILL", obj: [], tile: null,
-        anubis: false, tp: nextTp(p.slots), tpWhen: "Immediately", enter: "", start: [], rest: [],
-      }],
-    })),
-    removeSlot: (uid) => setPlan((p) => ({ ...p, slots: p.slots.filter((s) => s.uid !== uid) })),
-    updatePlayer: (uid, patch) => setPlan((p) => ({ ...p, roster: p.roster.map((r) => (r.uid === uid ? { ...r, ...patch } : r)) })),
-    addPlayer: (data) => setPlan((p) => ({
-      ...p,
-      roster: [...p.roster, Object.assign({ uid: window.OLStore.uid("r"), name: "", power: null, marches: null, rally: "No", garrison: "No", vote: "yes" }, data || {})],
-    })),
-    removePlayer: (uid) => setPlan((p) => ({ ...p, roster: p.roster.filter((r) => r.uid !== uid) })),
-    ensurePlayer: (name) => setPlan((p) => {
-      const nm = (name || "").trim();
-      if (!nm) return p;
-      if (p.roster.some((r) => (r.name || "").toLowerCase() === nm.toLowerCase())) return p;
-      return { ...p, roster: [...p.roster, { uid: window.OLStore.uid("r"), name: nm, power: null, marches: null, rally: "No", garrison: "No", vote: "yes" }] };
-    }),
-    resetDefaults: () => setPlan(window.OLStore.defaultPlan()),
-    clearAssignments: () => setPlan((p) => ({ ...p, slots: p.slots.map((s) => ({ ...s, player: "" })) })),
-    replacePlan: (p) => setPlan(p),
-  }), [plan]);
-
-  const slotsByLane = useM(() => {
-    const g = { A: [], B: [], C: [], D: [] };
-    plan.slots.forEach((s) => { (g[s.lane] || (g[s.lane] = [])).push(s); });
-    Object.values(g).forEach((arr) => arr.sort((a, b) => (a.tp || 0) - (b.tp || 0)));
-    return g;
-  }, [plan.slots]);
-
-  const counts = useM(() => {
-    const assignedNames = new Set(plan.slots.filter((s) => s.player).map((s) => s.player.toLowerCase()));
-    const reserves = plan.roster.filter((r) => !assignedNames.has((r.name || "").toLowerCase())).length;
-    const openSeats = plan.slots.filter((s) => !s.player).length;
-    return { slots: plan.slots.length, reserves, openSeats };
-  }, [plan.slots, plan.roster]);
-
-  const focusSlot = (uid) => {
-    setTab("board"); setSelected(uid); setOpenSlot(uid);
-    setTimeout(() => scrollToCard(uid), 120);
-  };
-  const toggleCard = (uid) => { setOpenSlot((cur) => (cur === uid ? null : uid)); setSelected(uid); };
-
-  /* ----- organiser actions ----- */
-  const doSignIn = async (pw) => {
-    setModalBusy(true); setModalErr("");
-    const res = await window.OLCloud.verify(pw);
-    setModalBusy(false);
-    if (res.ok || res.offline) {
-      window.OLStore.savePw(pw); setSignedIn(true); setModalOpen(false);
-      if (res.offline) setCloudStatus("offline");
-    } else {
-      setModalErr("That password didn't match. Try again.");
-    }
-  };
-  const doSignOut = () => { window.OLStore.savePw(""); setSignedIn(false); setPubState("idle"); if (tab === "manage") setTab("board"); };
-  const doPublish = async () => {
-    const pw = window.OLStore.loadPw();
-    if (!pw) { setModalOpen(true); return; }
-    setPubState("publishing"); setPubMsg("");
-    try {
-      const r = await window.OLCloud.publish(pw, plan);
-      const js = JSON.stringify(plan);
-      setPubJSON(js); window.OLStore.savePub(js);
-      setPubState("done"); setCloudNewer(false); setCloudStatus("live");
-      setPublishedAt(r.savedAt || Date.now());
-      const t = new Date(r.savedAt || Date.now());
-      setSavedLabel("Published " + t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-    } catch (e) {
-      setPubState("error");
-      setPubMsg(e.offline ? "No server reachable — deploy to Netlify first." : (e.message || "Publish failed"));
-    }
-  };
-  const doLoadLatest = async () => {
-    const res = await window.OLCloud.get();
-    if (res && res.plan) { const js = JSON.stringify(res.plan); setPlan(res.plan); setPubJSON(js); window.OLStore.savePub(js); setCloudNewer(false); setPublishedAt(res.savedAt || null); }
-  };
-
-  const TABS = signedIn ? [...BASE_TABS, { id: "manage", label: "⚙ Manage" }] : BASE_TABS;
-
+/* password modal */
+function SignInModal({ open, busy, error, offline, kingdomName, onClose, onSubmit }) {
+  const [pw, setPw] = useCS("");
+  const ref = useCR(null);
+  useCE(() => { if (open) { setPw(""); setTimeout(() => ref.current && ref.current.focus(), 30); } }, [open]);
+  if (!open) return null;
+  const submit = () => { if (pw.trim()) onSubmit(pw.trim()); };
   return (
-    <PlanCtx.Provider value={api}>
-      <div className="app">
-        <header className="hero">
-          <div className="hero-top">
-            <div className="brand">
-              <div className="crest">OL</div>
-              <div className="brand-txt">
-                <h1>Ark of Osiris</h1>
-                <p>{plan.meta.weekLabel ? plan.meta.weekLabel : "Lane assignments · teleport order · garrison & rally calls"}</p>
-              </div>
-            </div>
-            <div className="hero-actions">
-              <window.CloudPill status={cloudStatus} />
-              <window.PublishedStamp ts={publishedAt} status={cloudStatus} />
-              <window.OrganiserBar
-                signedIn={signedIn} dirty={dirty} pubState={pubState} pubMsg={pubMsg}
-                offline={cloudStatus === "offline"} cloudNewer={cloudNewer} savedLabel={savedLabel}
-                onSignIn={() => { setModalErr(""); setModalOpen(true); }}
-                onPublish={doPublish} onSignOut={doSignOut} onLoadLatest={doLoadLatest}
-              />
-              <SearchBar onSelect={focusSlot} />
-            </div>
-          </div>
-
-          <div className="hero-bar">
-            <div className="match-chip">
-              <span className="mc-ico">⏱</span>
-              <window.Countdown iso={plan.meta.matchTimeUTC} />
-            </div>
-            <div className="hero-stats">
-              <span><b>{counts.slots}</b> seats</span>
-              <span className="dot">·</span>
-              <span><b>4</b> lanes</span>
-              <span className="dot">·</span>
-              <span><b>{counts.openSeats}</b> open</span>
-              <span className="dot">·</span>
-              <span><b>{counts.reserves}</b> reserves</span>
-            </div>
-          </div>
-        </header>
-
-        <nav className="tabs">
-          {TABS.map((t) => (
-            <button key={t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>{t.label}</button>
-          ))}
-        </nav>
-
-        <main className="content">
-          {tab === "board" && (
-            <>
-              <AnubisBanner />
-              <div className="board">
-                {["A", "B", "C", "D"].map((L) => (
-                  <LaneColumn key={L} laneId={L} slots={slotsByLane[L]} selected={selected} openSlot={openSlot} onToggle={toggleCard} />
-                ))}
-              </div>
-            </>
-          )}
-          {tab === "teleport" && <TeleportTimeline onPick={focusSlot} />}
-          {tab === "roster" && <RosterTable onPick={focusSlot} />}
-          {tab === "map" && <MapTab />}
-          {tab === "legend" && <Legend />}
-          {tab === "manage" && signedIn && <window.Manage onJump={focusSlot} />}
-        </main>
-
-        <footer className="foot">
-          OL alliance · Ark of Osiris — weekly battle plan. {signedIn ? "Edit in Manage, then Publish to push it live for everyone." : "Tap any card for full orders."}
-        </footer>
+    <div className="modal-veil" onMouseDown={onClose}>
+      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+        <h3>Organiser sign-in</h3>
+        <p className="modal-sub">
+          {kingdomName ? <>Enter the <b>{kingdomName}</b> organiser password to edit{!offline && " and publish it live"}.</> :
+            <>Enter the organiser password to edit the plan{!offline && " and publish it live for everyone"}.</>}
+        </p>
+        <input
+          ref={ref} type="password" className="minput modal-input" placeholder="Organiser password"
+          value={pw} onChange={(e) => setPw(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") onClose(); }}
+        />
+        {error && <div className="modal-err">{error}</div>}
+        {offline && <div className="modal-note">No shared server detected — you can still edit, but changes stay in this browser only.</div>}
+        <div className="modal-actions">
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-add" disabled={busy || !pw.trim()} onClick={submit}>{busy ? "Checking…" : "Unlock"}</button>
+        </div>
       </div>
-
-      <window.SignInModal
-        open={modalOpen} busy={modalBusy} error={modalErr} offline={cloudStatus === "offline"}
-        onClose={() => setModalOpen(false)} onSubmit={doSignIn}
-      />
-    </PlanCtx.Provider>
+    </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+/* "updated X ago" — visible to everyone so players know the plan is current */
+function PublishedStamp({ ts, status }) {
+  const [, tick] = useCS(0);
+  useCE(() => { const t = setInterval(() => tick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
+  if (!ts || (status !== "live" && status !== "empty")) return null;
+  const diff = Date.now() - ts;
+  let rel;
+  if (diff < 60000) rel = "just now";
+  else { const m = Math.floor(diff / 60000); if (m < 60) rel = m + "m ago";
+    else { const h = Math.floor(m / 60); if (h < 24) rel = h + "h ago";
+      else { const d = Math.floor(h / 24); rel = d < 7 ? d + "d ago" : new Date(ts).toLocaleDateString(); } } }
+  return <span className="pub-stamp" title={"Plan last published " + new Date(ts).toLocaleString()}>Updated {rel}</span>;
+}
+
+Object.assign(window, { CloudPill, OrganiserBar, SignInModal, PublishedStamp });

@@ -1,40 +1,164 @@
-# Ark of Osiris — Battle Plan (deploy guide)
+/* OL · Ark of Osiris — admin (god mode). Manage kingdoms live, no redeploy.
+   Password-gated by OL_ADMIN_PASSWORD (server-side). Babel JSX. */
+const { useState: useA, useEffect: useAE, useRef: useAR } = React;
 
-A shared weekly battle plan for the OL alliance. Everyone who opens the site sees the
-**same live plan**. Only someone with the **organiser password** can edit and publish it.
+function AdminApp() {
+  const [pw, setPw] = useA("");
+  const [authed, setAuthed] = useA(false);
+  const [busy, setBusy] = useA(false);
+  const [err, setErr] = useA("");
+  const [kingdoms, setKingdoms] = useA([]);
+  const [envLocked, setEnvLocked] = useA(false);
+  const [offline, setOffline] = useA(false);
+  const [draft, setDraft] = useA({ id: "", name: "", view: "", edit: "" });
+  const [showPw, setShowPw] = useA({});
 
-## How it works
-- The plan is stored on the server (Netlify Blobs) by one small function: `netlify/functions/plan.mjs`.
-- Visitors get a clean, read-only view (Battle Board / Teleport / Roster / Map / Legend).
-- An organiser clicks **⚿ Organiser** (top-right), enters the password, and the **⚙ Manage** tab unlocks.
-- After editing, they click **Publish changes** → it pushes live for everyone.
+  const load = async (password) => {
+    setBusy(true); setErr("");
+    const r = await window.OLCloud.adminList(password);
+    setBusy(false);
+    if (r.offline) { setOffline(true); setErr("No server reachable — deploy to Netlify to use admin."); return; }
+    if (!r.ok) { setErr("Wrong admin password."); return; }
+    setAuthed(true); setKingdoms(r.kingdoms); setEnvLocked(r.envLocked);
+    try { localStorage.setItem("ol_admin_pw", password); } catch (e) {}
+  };
 
-## Deploy to Netlify (recommended: from Git)
-1. Put this whole folder in a GitHub repo (or GitLab/Bitbucket).
-2. In Netlify: **Add new site → Import an existing project** → pick the repo.
-3. Build settings: **no build command**, **publish directory = `.`** (already set in `netlify.toml`). Deploy.
-4. Set the organiser password: **Site configuration → Environment variables → Add**:
-   - Key: `OL_EDIT_PASSWORD`
-   - Value: *your secret password*
-   Then **Deploys → Trigger deploy → Deploy site** so it takes effect.
-5. Open the site, click **⚿ Organiser**, enter the password, edit in **Manage**, and **Publish**.
+  useAE(() => {
+    let saved = "";
+    try { saved = localStorage.getItem("ol_admin_pw") || ""; } catch (e) {}
+    if (saved) { setPw(saved); load(saved); }
+  }, []);
 
-> Netlify installs `@netlify/blobs` automatically from `package.json` on a Git deploy.
-> Manual drag-and-drop deploys do **not** run install, so use the Git flow above for the
-> publish feature to work. (Drag-and-drop still works for a view-only copy.)
+  const patchLocal = (id, field, val) => {
+    setKingdoms((ks) => ks.map((k) => (String(k.id) === String(id) ? { ...k, [field]: val } : k)));
+  };
 
-## Changing the password
-Either update the `OL_EDIT_PASSWORD` environment variable in Netlify (then redeploy),
-or edit the fallback constant near the top of `netlify/functions/plan.mjs`.
+  const saveKingdom = async (k) => {
+    setBusy(true); setErr("");
+    try {
+      await window.OLCloud.adminUpdate(pw, k);
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
 
-## Files
-- `index.html` — the app (also available as `Battle Plan.html`)
-- `assets/` — app code (data, store, cloud client, React components)
-- `netlify/functions/plan.mjs` — GET (read plan) / POST publish + verify (password-gated)
-- `netlify.toml`, `package.json` — Netlify config + the one dependency
+  const removeKingdom = async (id, name) => {
+    if (!confirm('Delete "' + name + '"? Its plan data will be removed too. This cannot be undone.')) return;
+    setBusy(true); setErr("");
+    try {
+      const r = await window.OLCloud.adminDelete(pw, id);
+      setKingdoms(r.kingdoms);
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
 
-## Notes
-- Opened locally (file://) or anywhere without the function, the app runs in **Local only**
-  mode: fully usable, but edits save just to that browser and there's no Publish.
-- Each visitor's browser also keeps a local cache, so the board paints instantly before the
-  live plan loads.
+  const createKingdom = async () => {
+    if (!draft.name.trim()) { setErr("Give the new kingdom a name."); return; }
+    setBusy(true); setErr("");
+    try {
+      const r = await window.OLCloud.adminCreate(pw, draft);
+      setKingdoms(r.kingdoms);
+      setDraft({ id: "", name: "", view: "", edit: "" });
+    } catch (e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  const toggleShow = (id) => setShowPw((s) => ({ ...s, [id]: !s[id] }));
+
+  if (!authed) {
+    return (
+      <div className="ga-veil">
+        <div className="ga-card">
+          <h2 className="ga-title">God Mode</h2>
+          <p className="ga-sub">Admin access — manage every kingdom on this site.</p>
+          {offline && <div className="ga-offline">No server reachable. Admin only works once deployed to Netlify.</div>}
+          <input
+            type="password" className="ga-input" placeholder="Admin password" value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") load(pw); }}
+          />
+          <button className="ga-btn ga-btn-primary" disabled={busy} onClick={() => load(pw)}>
+            {busy ? "Checking…" : "Enter"}
+          </button>
+          {err && <div className="ga-err">{err}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="ga-wrap">
+      <header className="ga-head">
+        <div>
+          <h1 className="ga-h1">Kingdom admin</h1>
+          <p className="ga-sub">Create, edit and remove kingdoms — live, no redeploy.</p>
+        </div>
+        <a className="ga-link" href="index.html">← Back to site</a>
+      </header>
+
+      {envLocked && (
+        <div className="ga-banner">
+          <b>OL_KINGDOMS env var is set</b> — it overrides the self-service list below. Remove that
+          environment variable in Netlify to manage kingdoms from here instead.
+        </div>
+      )}
+      {err && <div className="ga-err ga-err-block">{err}</div>}
+
+      <div className="ga-table-wrap">
+        <table className="ga-table">
+          <thead>
+            <tr><th>Name</th><th>ID / link</th><th>View password</th><th>Organiser password</th><th></th></tr>
+          </thead>
+          <tbody>
+            {kingdoms.map((k) => (
+              <tr key={k.id}>
+                <td><input className="ga-cell" value={k.name} disabled={envLocked}
+                  onChange={(e) => patchLocal(k.id, "name", e.target.value)}
+                  onBlur={() => saveKingdom(k)} /></td>
+                <td>
+                  <code className="ga-id">{k.id}</code>
+                  <a className="ga-copylink" href={"index.html?k=" + encodeURIComponent(k.id)} target="_blank" rel="noreferrer">open ↗</a>
+                </td>
+                <td className="ga-pwcell">
+                  <input className="ga-cell" type={showPw[k.id] ? "text" : "password"} value={k.view} disabled={envLocked}
+                    onChange={(e) => patchLocal(k.id, "view", e.target.value)}
+                    onBlur={() => saveKingdom(k)} />
+                </td>
+                <td className="ga-pwcell">
+                  <input className="ga-cell" type={showPw[k.id] ? "text" : "password"} value={k.edit} disabled={envLocked}
+                    onChange={(e) => patchLocal(k.id, "edit", e.target.value)}
+                    onBlur={() => saveKingdom(k)} />
+                </td>
+                <td className="ga-actions">
+                  <button className="ga-icon" title="Show/hide passwords" onClick={() => toggleShow(k.id)}>{showPw[k.id] ? "🙈" : "👁"}</button>
+                  {!envLocked && <button className="ga-icon ga-danger" title="Delete kingdom" onClick={() => removeKingdom(k.id, k.name)}>✕</button>}
+                </td>
+              </tr>
+            ))}
+            {kingdoms.length === 0 && <tr><td colSpan={5} className="ga-empty">No kingdoms yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+
+      {!envLocked && (
+        <div className="ga-new">
+          <h3 className="ga-h3">Add a new kingdom</h3>
+          <div className="ga-new-row">
+            <input className="ga-input sm" placeholder="Kingdom name (e.g. 4108)" value={draft.name}
+              onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+            <input className="ga-input sm" placeholder="View password (blank = random)" value={draft.view}
+              onChange={(e) => setDraft({ ...draft, view: e.target.value })} />
+            <input className="ga-input sm" placeholder="Organiser password (blank = random)" value={draft.edit}
+              onChange={(e) => setDraft({ ...draft, edit: e.target.value })} />
+            <button className="ga-btn ga-btn-primary" disabled={busy} onClick={createKingdom}>+ Create</button>
+          </div>
+          <p className="ga-hint">Leave a password blank to auto-generate one — it'll show in the table above once created.</p>
+        </div>
+      )}
+
+      <p className="ga-foot">Share <code>index.html?k=&lt;id&gt;</code> to deep-link a kingdom straight to its picker entry.
+      Keep this admin password secret — anyone with it can see and edit every kingdom's passwords.</p>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<AdminApp />);

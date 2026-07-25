@@ -1,98 +1,105 @@
-/* OL · Ark of Osiris — cloud / organiser UI. Babel JSX. Exports to window. */
-const { useState: useCS, useEffect: useCE, useRef: useCR } = React;
+/* Ark of Osiris — client side of the shared, per-kingdom plan. Attaches to window.OLCloud.
+   Talks to the Netlify function at /.netlify/functions/plan.
+   Every kingdom is isolated by its own view + edit passwords (checked server-side).
+   Degrades gracefully: with no function reachable (opened locally / in preview), calls
+   report "offline" and the app falls back to a local-only preview. */
+(function () {
+  const ENDPOINT = "/.netlify/functions/plan";
+  let available = null; // null = unknown, true = live backend, false = no backend
 
-/* live/offline pill shown in the header for everyone */
-function CloudPill({ status }) {
-  const map = {
-    loading: ["loading", "Connecting…"],
-    live: ["live", "Live plan"],
-    empty: ["live", "Live · not published yet"],
-    offline: ["offline", "Local only"],
-  };
-  const [cls, label] = map[status] || map.offline;
-  return (
-    <span className={"cloud-pill cp-" + cls} title={
-      cls === "live" ? "Everyone sees this same plan from the server."
-      : "No shared server reachable — changes save only in this browser."
-    }>
-      <i className="cp-dot"></i>{label}
-    </span>
-  );
-}
-
-/* organiser controls (only mounted when relevant) */
-function OrganiserBar({ signedIn, dirty, pubState, pubMsg, offline, cloudNewer, savedLabel, onSignIn, onPublish, onSignOut, onLoadLatest }) {
-  if (!signedIn) {
-    return <button className="org-btn" onClick={onSignIn} title="Organiser sign-in">⚿ Organiser</button>;
+  // Public list of kingdoms (names only) for the picker. null = offline.
+  async function listKingdoms() {
+    try {
+      const res = await fetch(ENDPOINT, { method: "GET", headers: { Accept: "application/json" } });
+      const ct = res.headers.get("content-type") || "";
+      if (!res.ok || !ct.includes("application/json")) { available = false; return null; }
+      const d = await res.json();
+      available = true;
+      return Array.isArray(d.kingdoms) ? d.kingdoms : [];
+    } catch (e) {
+      available = false;
+      return null;
+    }
   }
-  let label = "Up to date", disabled = true, cls = "pub-clean";
-  if (offline) { label = "Local only"; disabled = true; cls = "pub-offline"; }
-  else if (pubState === "publishing") { label = "Publishing…"; disabled = true; cls = "pub-busy"; }
-  else if (pubState === "error") { label = "Retry publish"; disabled = false; cls = "pub-error"; }
-  else if (dirty) { label = "Publish changes"; disabled = false; cls = "pub-dirty"; }
-  else if (pubState === "done") { label = "Published ✓"; disabled = true; cls = "pub-done"; }
 
-  return (
-    <div className="org-bar">
-      <span className="org-tag">Organiser</span>
-      <button className={"pub-btn " + cls} disabled={disabled} onClick={onPublish}>
-        {dirty && !offline && pubState !== "publishing" && <i className="pub-dot"></i>}
-        {label}
-      </button>
-      <button className="org-out" title="Sign out" onClick={onSignOut}>✕</button>
-      {cloudNewer && (
-        <div className="org-warn">
-          Someone else published a newer plan. <button onClick={onLoadLatest}>Load latest</button>
-        </div>
-      )}
-      {pubState === "error" && pubMsg && <div className="org-err">{pubMsg}</div>}
-      {!dirty && !offline && savedLabel && pubState !== "error" && <span className="org-saved">{savedLabel}</span>}
-    </div>
-  );
-}
+  async function post(payload) {
+    const res = await fetch(ENDPOINT, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) { available = false; const e = new Error("offline"); e.offline = true; throw e; }
+    available = true;
+    const data = await res.json().catch(() => ({}));
+    return { status: res.status, data };
+  }
 
-/* password modal */
-function SignInModal({ open, busy, error, offline, onClose, onSubmit }) {
-  const [pw, setPw] = useCS("");
-  const ref = useCR(null);
-  useCE(() => { if (open) { setPw(""); setTimeout(() => ref.current && ref.current.focus(), 30); } }, [open]);
-  if (!open) return null;
-  const submit = () => { if (pw.trim()) onSubmit(pw.trim()); };
-  return (
-    <div className="modal-veil" onMouseDown={onClose}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <h3>Organiser sign-in</h3>
-        <p className="modal-sub">
-          Enter the shared organiser password to edit the plan{!offline && " and publish it live for everyone"}.
-        </p>
-        <input
-          ref={ref} type="password" className="minput modal-input" placeholder="Organiser password"
-          value={pw} onChange={(e) => setPw(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") submit(); if (e.key === "Escape") onClose(); }}
-        />
-        {error && <div className="modal-err">{error}</div>}
-        {offline && <div className="modal-note">No shared server detected — you can still edit, but changes stay in this browser only.</div>}
-        <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-add" disabled={busy || !pw.trim()} onClick={submit}>{busy ? "Checking…" : "Unlock"}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
+  // Unlock + fetch a kingdom's plan with a view (or edit) password.
+  async function view(kingdom, password) {
+    try {
+      const { status, data } = await post({ action: "view", kingdom, password });
+      if (status === 404) return { ok: false, noKingdom: true };
+      if (status === 401) return { ok: false };
+      return { ok: !!data.ok, plan: data.plan || null, savedAt: data.savedAt || null };
+    } catch (e) {
+      return { ok: false, offline: true };
+    }
+  }
 
-/* "updated X ago" — visible to everyone so players know the plan is current */
-function PublishedStamp({ ts, status }) {
-  const [, tick] = useCS(0);
-  useCE(() => { const t = setInterval(() => tick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
-  if (!ts || (status !== "live" && status !== "empty")) return null;
-  const diff = Date.now() - ts;
-  let rel;
-  if (diff < 60000) rel = "just now";
-  else { const m = Math.floor(diff / 60000); if (m < 60) rel = m + "m ago";
-    else { const h = Math.floor(m / 60); if (h < 24) rel = h + "h ago";
-      else { const d = Math.floor(h / 24); rel = d < 7 ? d + "d ago" : new Date(ts).toLocaleDateString(); } } }
-  return <span className="pub-stamp" title={"Plan last published " + new Date(ts).toLocaleString()}>Updated {rel}</span>;
-}
+  // Verify an organiser (edit) password for a kingdom.
+  async function verify(kingdom, password) {
+    try {
+      const { status, data } = await post({ action: "verify", kingdom, password });
+      if (status === 401) return { ok: false };
+      if (status === 404) return { ok: false, noKingdom: true };
+      return { ok: !!data.ok };
+    } catch (e) {
+      return { ok: false, offline: true };
+    }
+  }
 
-Object.assign(window, { CloudPill, OrganiserBar, SignInModal, PublishedStamp });
+  // Publish a new plan for a kingdom (requires the edit password).
+  async function publish(kingdom, password, plan) {
+    const { status, data } = await post({ action: "publish", kingdom, password, plan });
+    if (status === 401) throw new Error("Wrong organiser password");
+    if (status === 404) throw new Error("Unknown kingdom");
+    if (status >= 400) throw new Error("Publish failed (" + status + ")");
+    return data;
+  }
+
+  function isAvailable() { return available; }
+
+  // ---- admin (god mode): manage the kingdom list itself, no redeploy needed ----
+  async function adminList(password) {
+    try {
+      const { status, data } = await post({ action: "admin-list", password });
+      if (status === 401) return { ok: false };
+      return { ok: !!data.ok, kingdoms: data.kingdoms || [], envLocked: !!data.envLocked };
+    } catch (e) {
+      return { ok: false, offline: true };
+    }
+  }
+  async function adminCreate(password, k) {
+    const { status, data } = await post({ action: "admin-create", password, ...k });
+    if (status === 401) throw new Error("Wrong admin password");
+    if (status >= 400) throw new Error(data.error || "Create failed");
+    return data;
+  }
+  async function adminUpdate(password, k) {
+    const { status, data } = await post({ action: "admin-update", password, ...k });
+    if (status === 401) throw new Error("Wrong admin password");
+    if (status >= 400) throw new Error(data.error || "Update failed");
+    return data;
+  }
+  async function adminDelete(password, id) {
+    const { status, data } = await post({ action: "admin-delete", password, id });
+    if (status === 401) throw new Error("Wrong admin password");
+    if (status >= 400) throw new Error(data.error || "Delete failed");
+    return data;
+  }
+
+  window.OLCloud = {
+    ENDPOINT, listKingdoms, view, verify, publish, isAvailable,
+    adminList, adminCreate, adminUpdate, adminDelete,
+  };
+})();
